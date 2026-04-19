@@ -1,7 +1,6 @@
 use core::panic;
 
-#[allow(dead_code, unused_assignments)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Token {
     Eof,
     Def,
@@ -89,5 +88,46 @@ where
                 Token::Char(c)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_keyword() {
+        let mut lex = Lexer::new("def extern def".chars());
+        assert_eq!(Token::Def, lex.gettok());
+        assert_eq!(Token::Extern, lex.gettok());
+        assert_eq!(Token::Def, lex.gettok());
+        assert_eq!(Token::Eof, lex.gettok());
+    }
+
+    #[test]
+    fn test_numeric() {
+        let mut lex = Lexer::new("1.234  123.21312 5644.44564                 13123.212".chars());
+        assert_eq!(Token::Number(1.234), lex.gettok());
+        assert_eq!(Token::Number(123.21312), lex.gettok());
+        assert_eq!(Token::Number(5644.44564), lex.gettok());
+        assert_eq!(Token::Number(13123.212), lex.gettok());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_numerics() {
+        let mut lex = Lexer::new("127.0.0.1".chars());
+        lex.gettok();
+    }
+
+    #[test]
+    fn test_comments_and_chars() {
+        let mut lex = Lexer::new("funny_function69420() # does funny things haha".chars());
+
+        assert_eq!(Token::Identifier("funny".to_string()), lex.gettok());
+        assert_eq!(Token::Char('_'), lex.gettok());
+        assert_eq!(Token::Identifier("function69420".to_string()), lex.gettok());
+        assert_eq!(Token::Char('('), lex.gettok());
+        assert_eq!(Token::Char(')'), lex.gettok());
+        assert_eq!(Token::Eof, lex.gettok());
     }
 }
