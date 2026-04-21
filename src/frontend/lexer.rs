@@ -53,11 +53,16 @@ where
         }
 
         // identifier: [a-zA-Z][a-zA-Z0-9]*
-        if self.last_char.is_some_and(|c| c.is_ascii_alphabetic()) {
+        if self
+            .last_char
+            // NOTE: not sure if '_'
+            // should be handled like this
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        {
             let mut identifier_str = String::new();
 
             while let Some(c) = self.last_char
-                && c.is_alphanumeric()
+                && (c.is_alphanumeric() || c == '_')
             {
                 identifier_str.push(c);
                 self.last_char = self.input.next();
@@ -123,9 +128,10 @@ mod test {
     fn test_comments_and_chars() {
         let mut lex = Lexer::new("funny_function69420() # does funny things haha".chars());
 
-        assert_eq!(Token::Identifier("funny".to_string()), lex.gettok());
-        assert_eq!(Token::Char('_'), lex.gettok());
-        assert_eq!(Token::Identifier("function69420".to_string()), lex.gettok());
+        assert_eq!(
+            Token::Identifier("funny_function69420".to_string()),
+            lex.gettok()
+        );
         assert_eq!(Token::Char('('), lex.gettok());
         assert_eq!(Token::Char(')'), lex.gettok());
         assert_eq!(Token::Eof, lex.gettok());
