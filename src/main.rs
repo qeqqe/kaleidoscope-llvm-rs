@@ -100,7 +100,8 @@ fn handle_input_line<'ctx>(compiler: &mut Compiler<'ctx>, line: &str) -> Result<
             let function = parser.parse_top_level_expr()?;
             ensure_fully_parsed(&parser)?;
             compiler.emit_function(&function)?;
-            println!("parsed top-level expression");
+            let result = compiler.run_anon_expr()?;
+            println!("=> {result}");
             Ok(())
         }
     }

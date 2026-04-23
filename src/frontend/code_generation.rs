@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
 use inkwell::{
-    FloatPredicate,
+    FloatPredicate, OptimizationLevel,
     builder::Builder,
     context::Context,
+    execution_engine::ExecutionEngine,
     module::Module,
+    passes::PassBuilderOptions,
+    targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
     types::BasicMetadataTypeEnum,
     values::{BasicMetadataValueEnum, BasicValue, FloatValue, FunctionValue},
 };
@@ -15,6 +18,7 @@ pub struct Compiler<'ctx> {
     pub context: &'ctx Context,
     pub builder: Builder<'ctx>,
     pub module: Module<'ctx>,
+    pub execution_engine: ExecutionEngine<'ctx>,
 
     /// maps parameter names to their SSA value pointers
     named_values: HashMap<String, FloatValue<'ctx>>,
@@ -22,13 +26,83 @@ pub struct Compiler<'ctx> {
 
 pub type CodegenResult<T> = Result<T, String>;
 
+fn create_target_machine() -> TargetMachine {
+    Target::initialize_native(&InitializationConfig::default())
+        .expect("Failed to initialize native target");
+
+    let triple = TargetMachine::get_default_triple();
+    let cpu = TargetMachine::get_host_cpu_name().to_string();
+    let features = TargetMachine::get_host_cpu_features().to_string();
+
+    Target::from_triple(&triple)
+        .unwrap()
+        .create_target_machine(
+            &triple,
+            &cpu,
+            &features,
+            OptimizationLevel::None,
+            RelocMode::Default,
+            CodeModel::Default,
+        )
+        .unwrap()
+}
+
+pub fn optimize_function(module: &Module, machine: &TargetMachine) -> CodegenResult<()> {
+    let opts = PassBuilderOptions::create();
+
+    module
+        .run_passes(
+            "function(instcombine,reassociate,gvn,simplifycfg,mem2reg)",
+            machine,
+            opts,
+        )
+        .map_err(|e| e.to_string())
+}
+
 impl<'ctx> Compiler<'ctx> {
     pub fn new(context: &'ctx Context, module_name: &str) -> Self {
+        let module = context.create_module(module_name);
+        let execution_engine = module
+            .create_jit_execution_engine(OptimizationLevel::Aggressive)
+            .unwrap();
+        let target_data = execution_engine.get_target_data();
+        let data_layout = target_data.get_data_layout();
+        module.set_data_layout(&data_layout);
+        module.set_triple(&TargetMachine::get_default_triple());
+
+        let opts = PassBuilderOptions::create();
+        opts.set_loop_unrolling(true);
+        opts.set_loop_interleaving(true);
+        opts.set_loop_vectorization(true);
+        opts.set_loop_slp_vectorization(true);
+        opts.set_merge_functions(false);
+        opts.set_verify_each(true);
+
+        let _ = module.create_jit_execution_engine(OptimizationLevel::Aggressive);
+
+        let machine = &create_target_machine();
+
+        let passes = "default<O3>";
+
+        module.run_passes(passes, machine, opts).unwrap();
+
         Self {
             context,
             builder: context.create_builder(),
-            module: context.create_module(module_name),
+            module,
+            execution_engine,
             named_values: HashMap::new(),
+        }
+    }
+
+    pub fn run_anon_expr(&self) -> Result<f64, String> {
+        type AnonFn = unsafe extern "C" fn() -> f64;
+        unsafe {
+            let f = self
+                .execution_engine
+                .get_function::<AnonFn>("__anon_expr")
+                .map_err(|e| format!("jit lookup failed: {e}"))?;
+            Ok(f.call())
         }
     }
 
@@ -175,6 +249,7 @@ impl<'ctx> Compiler<'ctx> {
                     .map_err(|e| e.to_string())?;
 
                 if function.verify(true) {
+                    optimize_function(&self.module, &create_target_machine())?;
                     Ok(function)
                 } else {
                     unsafe { function.delete() };
@@ -186,5 +261,9 @@ impl<'ctx> Compiler<'ctx> {
                 Err(e)
             }
         }
+    }
+
+    pub fn handle_top_level_expr(&mut self) -> CodegenResult<()> {
+        todo!()
     }
 }
